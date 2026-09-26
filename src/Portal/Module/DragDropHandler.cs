@@ -53,7 +53,7 @@ public class DragDropHandler
                 }
             }
 
-            if (TryGetMinecraftFolder(data, out var folderPath))
+            if (TryGetMinecraftFolder(data, out var folderPath) && !TryGetNestedArchive(folderPath, out _))
             {
                 e.Handled = true;
                 await HandleMinecraftFolderAsync(folderPath, window);
@@ -167,7 +167,7 @@ public class DragDropHandler
     private static bool TryFastClassify(string? text, string[]? paths,
         out string? message, out DragDropEffects effects)
     {
-        if (paths is [var folderPath] && Directory.Exists(folderPath))
+        if (paths is [var folderPath] && Directory.Exists(folderPath) && !TryGetNestedArchive(folderPath, out _))
         {
             message = CommonLanguageManager.Instance.dragDrop_detectedFolder.CurrentValue();
             effects = DragDropEffects.Copy;
@@ -255,8 +255,14 @@ public class DragDropHandler
             effects = DragDropEffects.Link;
         }
 
-        if (paths is [var modpackPath] && File.Exists(modpackPath) &&
-            ModpackSniffer.TrySniff(modpackPath, out _, out _))
+        if (paths is [var modpackPath] && TryGetNestedArchive(modpackPath, out var nestedArchive) &&
+            ModpackSniffer.TrySniff(nestedArchive, out _, out _))
+        {
+            message = CommonLanguageManager.Instance.dragDrop_detectedModpack.CurrentValue();
+            effects = DragDropEffects.Copy;
+        }
+        else if (paths is [var directArchivePath] && File.Exists(directArchivePath) &&
+            ModpackSniffer.TrySniff(directArchivePath, out _, out _))
         {
             message = CommonLanguageManager.Instance.dragDrop_detectedModpack.CurrentValue();
             effects = DragDropEffects.Copy;
@@ -269,7 +275,7 @@ public class DragDropHandler
             effects = DragDropEffects.Copy;
         }
 
-        if (paths is [var folderPath] && Directory.Exists(folderPath))
+        if (paths is [var folderPath] && Directory.Exists(folderPath) && !TryGetNestedArchive(folderPath, out _))
         {
             message = CommonLanguageManager.Instance.dragDrop_detectedFolder.CurrentValue();
             effects = DragDropEffects.Copy;
@@ -433,12 +439,43 @@ public class DragDropHandler
         if (files is not [var file]) return false;
 
         var path = file.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return false;
-        if (!ModpackSniffer.TrySniff(path, out source, out var sniffedInstanceId)) return false;
+        if (string.IsNullOrWhiteSpace(path) || !TryGetNestedArchive(path, out var archive)) return false;
+        if (!ModpackSniffer.TrySniff(archive, out source, out var sniffedInstanceId)) return false;
 
-        archivePath = path;
+        archivePath = archive;
         suggestedInstanceId = sniffedInstanceId ?? string.Empty;
         return true;
+    }
+
+    private static bool TryGetNestedArchive(string path, out string archivePath)
+    {
+        archivePath = string.Empty;
+        if (File.Exists(path))
+        {
+            archivePath = path;
+            return true;
+        }
+
+        if (!Directory.Exists(path)) return false;
+        try
+        {
+            var candidates = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                .Where(file => file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                               file.EndsWith(".mrpack", StringComparison.OrdinalIgnoreCase) ||
+                               file.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))
+                .Take(2).ToArray();
+            if (candidates.Length != 1) return false;
+            archivePath = candidates[0];
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool TryGetMinecraftFolder(IDataTransfer data, out string folderPath)

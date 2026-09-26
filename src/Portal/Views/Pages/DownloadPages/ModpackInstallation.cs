@@ -173,6 +173,14 @@ internal static class ModpackInstallation
 
     public static async Task TryInstallFromPath(TopLevel topLevel, string path)
     {
+        if (Directory.Exists(path))
+        {
+            var nestedArchives = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                .Where(file => file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                               file.EndsWith(".mrpack", StringComparison.OrdinalIgnoreCase))
+                .Take(2).ToArray();
+            if (nestedArchives.Length == 1) path = nestedArchives[0];
+        }
         if (!TryGetModpack(path, out var archivePath, out var source, out var suggestedInstanceId))
         {
             Logger.Warning($"[Modpack] Rejected invalid local modpack archive {path}.");
@@ -361,15 +369,49 @@ internal static class ModpackInstallation
         var installFolder = isPortalMc ? Path.Combine(portalMcRoot, "meta") : folder;
         var instancesRoot = isPortalMc ? Path.Combine(portalMcRoot, "instances") : null;
         var instancePath = Path.Combine(instancesRoot ?? Path.Combine(folder, "versions"), instanceId);
-        if (Directory.Exists(instancePath))
-            throw new InvalidOperationException(string.Format(
-                CommonLanguageManager.Instance.modpack_instanceIdExists.CurrentValue(), instanceId));
         var stopwatch = Stopwatch.StartNew();
         var localInstanceCommitted = false;
+        IReadOnlyList<string> importedVersionIds = [];
         Logger.Info($"[Modpack] Installing local {source} modpack {archivePath} to {instancePath}.");
 
         try
         {
+            if (source == ModDetailsSource.LocalInstance)
+            {
+                var versionIds = LocalInstanceArchiveService.GetVersionIds(archivePath);
+                if (versionIds.Count > 1)
+                {
+                    importedVersionIds = versionIds;
+                    var versionRoot = instancesRoot ?? Path.Combine(folder, "versions");
+                    var existingVersion = versionIds.FirstOrDefault(versionId =>
+                        Directory.Exists(Path.Combine(versionRoot, versionId)));
+                    if (existingVersion is not null)
+                        throw new InvalidOperationException(string.Format(
+                            CommonLanguageManager.Instance.modpack_instanceIdExists.CurrentValue(), existingVersion));
+
+                    var childTasks = versionIds.Select(versionId => context.Task.CreateChild(
+                        new TaskOptions
+                        {
+                            Name = string.Format(CommonLanguageManager.Instance.modpack_installTaskName.CurrentValue(), versionId),
+                            Description = CommonLanguageManager.Instance.modpack_preparingInstall.CurrentValue(),
+                            Progress = 0
+                        },
+                        child => InstallLocalVersionAsync(child, archivePath, folder, versionId, versionId))).ToArray();
+                    foreach (var childTask in childTasks) childTask.Start();
+                    await Task.WhenAll(childTasks.Select(childTask => childTask.Completion));
+                    var failed = childTasks.FirstOrDefault(childTask => childTask.Status == ManagedTaskStatus.Faulted);
+                    if (failed?.Exception is not null) throw failed.Exception;
+                    await RefreshInstancesAsync(context, instanceId);
+                    return instancePath;
+                }
+                if (versionIds.Count == 1)
+                {
+                    await InstallLocalVersionAsync(context, archivePath, folder, versionIds[0], instanceId);
+                    await RefreshInstancesAsync(context, instanceId);
+                    return instancePath;
+                }
+            }
+
             string installedId;
             switch (source)
             {
@@ -382,6 +424,9 @@ internal static class ModpackInstallation
                         GetForgeJavaPath(), instancesRoot)).Id;
                     break;
                 case ModDetailsSource.LocalInstance:
+                    if (Directory.Exists(instancePath))
+                        throw new InvalidOperationException(string.Format(
+                            CommonLanguageManager.Instance.modpack_instanceIdExists.CurrentValue(), instanceId));
                     await InstallLocalInstanceAsync(context, archivePath, instancePath);
                     localInstanceCommitted = true;
                     installedId = instanceId;
@@ -416,6 +461,7 @@ internal static class ModpackInstallation
                 $"[Modpack] Local installation of {archivePath} was cancelled after {stopwatch.Elapsed}: {exception}");
             if (source != ModDetailsSource.LocalInstance || localInstanceCommitted)
                 await DeleteDirectoryAsync(instancePath);
+            await DeleteImportedVersionsAsync(folder, importedVersionIds);
             await DeletePortalMcTemporaryLoaderAsync(instancesRoot, installFolder, instanceId);
             throw;
         }
@@ -424,9 +470,19 @@ internal static class ModpackInstallation
             Logger.Error(exception);
             if (source != ModDetailsSource.LocalInstance || localInstanceCommitted)
                 await DeleteDirectoryAsync(instancePath);
+            await DeleteImportedVersionsAsync(folder, importedVersionIds);
             await DeletePortalMcTemporaryLoaderAsync(instancesRoot, installFolder, instanceId);
             throw;
         }
+    }
+
+    private static async Task DeleteImportedVersionsAsync(string folder, IReadOnlyList<string> versionIds)
+    {
+        if (versionIds.Count == 0) return;
+        var isPortalMc = MinecraftFolderLayout.TryFindPortalMcRoot(folder, out var portalMcRoot);
+        var root = isPortalMc ? Path.Combine(portalMcRoot, "instances") : Path.Combine(folder, "versions");
+        foreach (var versionId in versionIds)
+            await DeleteDirectoryAsync(Path.Combine(root, versionId));
     }
 
     private static async Task InstallLocalInstanceAsync(TaskExecutionContext context, string archivePath,
@@ -439,7 +495,7 @@ internal static class ModpackInstallation
             await RunStepAsync(context, CommonLanguageManager.Instance.modpack_stepExtractingModpack.CurrentValue(),
                 CommonLanguageManager.Instance.modpack_localInstanceExtracting.CurrentValue(), step =>
                 LocalInstanceArchiveService.ExtractAsync(archivePath, stagingPath, step.CancellationToken,
-                    new Progress<double>(progress => step.ReportProgress(progress))));
+                    new Progress<double>(progress => ReportProgressIfActive(step, progress))));
 
             context.CancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(Path.GetDirectoryName(instancePath)!);
@@ -448,6 +504,66 @@ internal static class ModpackInstallation
         finally
         {
             await DeleteDirectoryAsync(stagingPath);
+        }
+    }
+
+    private static async Task InstallLocalVersionAsync(TaskExecutionContext context, string archivePath, string folder,
+        string versionId, string instanceId)
+    {
+        var isPortalMc = MinecraftFolderLayout.TryFindPortalMcRoot(folder, out var portalMcRoot);
+        var instancesRoot = isPortalMc ? Path.Combine(portalMcRoot, "instances") : null;
+        var instancePath = Path.Combine(instancesRoot ?? Path.Combine(folder, "versions"), instanceId);
+        if (Directory.Exists(instancePath))
+            throw new InvalidOperationException(string.Format(
+                CommonLanguageManager.Instance.modpack_instanceIdExists.CurrentValue(), instanceId));
+
+        var stagingPath = Path.Combine(Path.GetTempPath(), "Portal", "modpacks", "instances",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            await LocalInstanceArchiveService.ExtractVersionAsync(archivePath, stagingPath, versionId,
+                context.CancellationToken,
+                new Progress<double>(progress => ReportProgressIfActive(context, progress)));
+            context.CancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.GetDirectoryName(instancePath)!);
+            Directory.Move(stagingPath, instancePath);
+            ImportPortalSettings(instancePath);
+        }
+        catch
+        {
+            await DeleteDirectoryAsync(instancePath);
+            throw;
+        }
+        finally
+        {
+            await DeleteDirectoryAsync(stagingPath);
+        }
+    }
+
+    private static Task RefreshInstancesAsync(TaskExecutionContext context, string instanceId)
+    {
+        return RunStepAsync(context, CommonLanguageManager.Instance.minecraft_refreshInstancesStep.CurrentValue(),
+            CommonLanguageManager.Instance.minecraft_scanningNewInstances.CurrentValue(), step =>
+        {
+            InstanceManager.Instance.RefreshAll(Data.ConfigEntry.MinecraftFolders);
+            step.SetDescription(string.Format(
+                CommonLanguageManager.Instance.minecraft_instancesRefreshed.CurrentValue(), instanceId));
+            step.ReportProgress(1);
+            return Task.CompletedTask;
+        });
+    }
+
+    private static void ReportProgressIfActive(TaskExecutionContext context, double progress)
+    {
+        if (context.Task.IsTerminal || context.Task.IsCancellationRequested) return;
+
+        try
+        {
+            context.ReportProgress(progress);
+        }
+        catch (InvalidOperationException) when (context.Task.IsTerminal || context.Task.IsCancellationRequested)
+        {
+            // Progress callbacks are dispatched asynchronously and may run after cancellation.
         }
     }
 

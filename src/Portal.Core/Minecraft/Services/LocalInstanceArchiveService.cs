@@ -6,7 +6,7 @@ public static class LocalInstanceArchiveService
 {
     private static readonly string[] InstanceDirectories =
     [
-        "mods", "config", "resourcepacks", "shaderpacks", "saves", "scripts", "kubejs", "datapacks"
+        "mods", "config", "resourcepacks", "shaderpacks", "saves", "scripts", "kubejs", "datapacks", "versions"
     ];
 
     private static readonly string[] InstanceFiles =
@@ -44,6 +44,54 @@ public static class LocalInstanceArchiveService
     {
         using var archive = ZipFile.OpenRead(archivePath);
         var entries = PrepareEntries(archive);
+        await ExtractEntriesAsync(entries, destination, cancellationToken, progress);
+    }
+
+    public static IReadOnlyList<string> GetVersionIds(string archivePath)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        var files = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)).ToArray();
+        var root = FindCommonRoot(files);
+        var versionIds = files
+            .Where(entry => !string.IsNullOrEmpty(entry.Name))
+            .Select(entry => RemoveRoot(entry.FullName, root).Split('/'))
+            .Where(parts => parts.Length >= 3 && parts[0].Equals("versions", StringComparison.OrdinalIgnoreCase))
+            .Select(parts => parts[1])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (versionIds.Length > 0) return versionIds;
+
+        var versionFile = files.Select(entry => RemoveRoot(entry.FullName, root))
+            .Select(Path.GetFileName)
+            .FirstOrDefault(name => name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
+                                    files.Any(entry => string.Equals(
+                                        Path.GetFileNameWithoutExtension(entry.Name) + ".jar", name,
+                                        StringComparison.OrdinalIgnoreCase)));
+        return versionFile is null ? [] : [Path.GetFileNameWithoutExtension(versionFile)];
+    }
+
+    public static async Task ExtractVersionAsync(string archivePath, string destination, string versionId,
+        CancellationToken cancellationToken, IProgress<double>? progress = null)
+    {
+        using var archive = ZipFile.OpenRead(archivePath);
+        var root = FindCommonRoot(archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)).ToArray());
+        var prefix = $"versions/{versionId}/";
+        var entries = archive.Entries
+            .Where(entry => !string.IsNullOrEmpty(entry.Name))
+            .Select(entry => (Entry: entry, Path: RemoveRoot(entry.FullName, root)))
+            .Where(item => !item.Path.StartsWith("versions/", StringComparison.OrdinalIgnoreCase) ||
+                           item.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(item => (item.Entry, item.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? item.Path[prefix.Length..]
+                : item.Path))
+            .ToList();
+        ValidateEntries(entries);
+        await ExtractEntriesAsync(entries, destination, cancellationToken, progress);
+    }
+
+    private static async Task ExtractEntriesAsync(IReadOnlyList<(ZipArchiveEntry Entry, string RelativePath)> entries,
+        string destination, CancellationToken cancellationToken, IProgress<double>? progress)
+    {
         Directory.CreateDirectory(destination);
 
         for (var index = 0; index < entries.Count; index++)
@@ -76,13 +124,18 @@ public static class LocalInstanceArchiveService
 
         var root = FindCommonRoot(files);
         var result = new List<(ZipArchiveEntry, string)>(archive.Entries.Count);
+        var entries = archive.Entries.Select(entry => (Entry: entry, Path: RemoveRoot(entry.FullName, root)))
+            .Where(item => !string.IsNullOrEmpty(item.Path)).ToList();
+        ValidateEntries(entries);
+        return entries;
+    }
+
+    private static void ValidateEntries(IReadOnlyList<(ZipArchiveEntry Entry, string RelativePath)> entries)
+    {
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var entry in archive.Entries)
+        foreach (var (entry, relativePath) in entries)
         {
-            var relativePath = RemoveRoot(entry.FullName, root);
-            if (string.IsNullOrEmpty(relativePath)) continue;
             ValidateRelativePath(relativePath);
 
             if (entry.Name.Length == 0)
@@ -102,11 +155,7 @@ public static class LocalInstanceArchiveService
                     throw new InvalidDataException("Archive contains conflicting entries.");
                 parent = Path.GetDirectoryName(parent);
             }
-
-            result.Add((entry, relativePath));
         }
-
-        return result;
     }
 
     private static string? FindCommonRoot(IReadOnlyCollection<ZipArchiveEntry> entries)
