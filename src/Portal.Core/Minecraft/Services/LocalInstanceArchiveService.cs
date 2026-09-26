@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Portal.Core.Minecraft.Services;
 
@@ -65,7 +67,8 @@ public static class LocalInstanceArchiveService
             .Select(Path.GetFileName)
             .FirstOrDefault(name => name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
                                     files.Any(entry => string.Equals(
-                                        Path.GetFileNameWithoutExtension(entry.Name) + ".jar", name,
+                                        Path.GetFileName(entry.Name),
+                                        Path.GetFileNameWithoutExtension(name) + ".jar",
                                         StringComparison.OrdinalIgnoreCase)));
         return versionFile is null ? [] : [Path.GetFileNameWithoutExtension(versionFile)];
     }
@@ -88,6 +91,157 @@ public static class LocalInstanceArchiveService
         ValidateEntries(entries);
         await ExtractEntriesAsync(entries, destination, cancellationToken, progress);
     }
+
+    public static async Task NormalizeAsync(string stagingPath, string instancePath, string metadataRoot,
+        bool portalLayout, string instanceId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var version = FindVersionMetadata(stagingPath, instanceId);
+        var baseId = version?.Id ?? instanceId;
+        var baseRoot = portalLayout ? Path.Combine(metadataRoot, "versions", baseId) : instancePath;
+
+        Directory.CreateDirectory(instancePath);
+        if (version is not null)
+        {
+            Directory.CreateDirectory(baseRoot);
+            await CopyFileAsync(version.JsonPath,
+                Path.Combine(baseRoot, $"{(portalLayout ? baseId : instanceId)}.json"), cancellationToken);
+            if (version.JarPath is not null)
+                await CopyFileAsync(version.JarPath,
+                    Path.Combine(baseRoot, $"{(portalLayout ? baseId : instanceId)}.jar"), cancellationToken);
+        }
+
+        await CopyContentAsync(stagingPath, instancePath,
+            new HashSet<string>(["versions", "assets", "libraries"], StringComparer.OrdinalIgnoreCase),
+            [version?.JsonPath, version?.JarPath], cancellationToken);
+
+        if (portalLayout)
+        {
+            var assets = Path.Combine(stagingPath, "assets");
+            var libraries = Path.Combine(stagingPath, "libraries");
+            if (Directory.Exists(assets))
+                await CopyDirectoryAsync(assets, Path.Combine(metadataRoot, "assets"), cancellationToken);
+            if (Directory.Exists(libraries))
+                await CopyDirectoryAsync(libraries, Path.Combine(metadataRoot, "libraries"), cancellationToken);
+
+            var instanceManifest = new JsonObject
+            {
+                ["id"] = instanceId,
+                ["inheritsFrom"] = baseId
+            };
+            await File.WriteAllTextAsync(Path.Combine(instancePath, $"{instanceId}.json"),
+                instanceManifest.ToJsonString(), cancellationToken);
+        }
+        else
+        {
+            var root = Directory.GetParent(instancePath)?.Parent?.FullName;
+            if (!string.IsNullOrWhiteSpace(root))
+            {
+                var assets = Path.Combine(stagingPath, "assets");
+                var libraries = Path.Combine(stagingPath, "libraries");
+                if (Directory.Exists(assets))
+                    await CopyDirectoryAsync(assets, Path.Combine(root, "assets"), cancellationToken);
+                if (Directory.Exists(libraries))
+                    await CopyDirectoryAsync(libraries, Path.Combine(root, "libraries"), cancellationToken);
+            }
+
+            var jsonPath = Path.Combine(instancePath, $"{instanceId}.json");
+            if (!File.Exists(jsonPath))
+            {
+                var manifest = version?.Document ?? new JsonObject
+                {
+                    ["id"] = instanceId,
+                    ["mainClass"] = "net.minecraft.client.main.Main",
+                    ["libraries"] = new JsonArray()
+                };
+                manifest["id"] = instanceId;
+                await File.WriteAllTextAsync(jsonPath, manifest.ToJsonString(), cancellationToken);
+            }
+        }
+
+        if (!portalLayout && version is not null)
+        {
+            var jsonPath = Path.Combine(instancePath, $"{instanceId}.json");
+            var manifest = version.Document.DeepClone().AsObject();
+            manifest["id"] = instanceId;
+            await File.WriteAllTextAsync(jsonPath, manifest.ToJsonString(), cancellationToken);
+        }
+    }
+
+    private static VersionMetadata? FindVersionMetadata(string stagingPath, string instanceId)
+    {
+        var jsonFiles = Directory.Exists(stagingPath)
+            ? Directory.EnumerateFiles(stagingPath, "*.json", SearchOption.AllDirectories).ToArray()
+            : [];
+        foreach (var jsonPath in jsonFiles.OrderBy(path =>
+                     Path.GetFileNameWithoutExtension(path).Equals(instanceId, StringComparison.OrdinalIgnoreCase) ? 0 :
+                     File.Exists(Path.Combine(Path.GetDirectoryName(path)!,
+                         $"{Path.GetFileNameWithoutExtension(path)}.jar")) ? 1 : 2))
+        {
+            try
+            {
+                var document = JsonNode.Parse(File.ReadAllText(jsonPath)) as JsonObject;
+                if (document is null || !document.ContainsKey("mainClass") &&
+                    !File.Exists(Path.Combine(Path.GetDirectoryName(jsonPath)!,
+                        $"{Path.GetFileNameWithoutExtension(jsonPath)}.jar"))) continue;
+                var id = document["id"]?.GetValue<string>() ?? Path.GetFileNameWithoutExtension(jsonPath);
+                var jar = Path.Combine(Path.GetDirectoryName(jsonPath)!, $"{Path.GetFileNameWithoutExtension(jsonPath)}.jar");
+                return new VersionMetadata(id, jsonPath, File.Exists(jar) ? jar : null, document);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task CopyContentAsync(string source, string destination, IReadOnlySet<string> excludedDirectories,
+        IEnumerable<string?> excludedFiles, CancellationToken cancellationToken)
+    {
+        var excluded = excludedFiles.Where(path => path is not null)
+            .Select(path => Path.GetFullPath(path!)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (excludedDirectories.Contains(Path.GetFileName(directory))) continue;
+            await CopyDirectoryAsync(directory, Path.Combine(destination, Path.GetFileName(directory)), cancellationToken);
+        }
+
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!excluded.Contains(Path.GetFullPath(file)))
+                await CopyFileAsync(file, Path.Combine(destination, Path.GetFileName(file)), cancellationToken);
+        }
+    }
+
+    private static async Task CopyDirectoryAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await CopyFileAsync(file, Path.Combine(destination, Path.GetRelativePath(source, file)), cancellationToken);
+        }
+    }
+
+    private static async Task CopyFileAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await using var input = File.OpenRead(source);
+        await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920,
+            useAsync: true);
+        await input.CopyToAsync(output, cancellationToken);
+    }
+
+    private sealed record VersionMetadata(string Id, string JsonPath, string? JarPath, JsonObject Document);
 
     private static async Task ExtractEntriesAsync(IReadOnlyList<(ZipArchiveEntry Entry, string RelativePath)> entries,
         string destination, CancellationToken cancellationToken, IProgress<double>? progress)

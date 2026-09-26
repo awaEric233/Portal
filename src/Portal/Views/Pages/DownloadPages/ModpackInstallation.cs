@@ -499,7 +499,10 @@ internal static class ModpackInstallation
 
             context.CancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(Path.GetDirectoryName(instancePath)!);
-            Directory.Move(stagingPath, instancePath);
+            var isPortalMc = MinecraftFolderLayout.TryFindPortalMcRoot(Path.GetDirectoryName(instancePath)!, out var portalMcRoot);
+            var metadataRoot = isPortalMc ? Path.Combine(portalMcRoot, "meta") : Path.GetDirectoryName(Path.GetDirectoryName(instancePath)!)!;
+            await LocalInstanceArchiveService.NormalizeAsync(stagingPath, instancePath, metadataRoot, isPortalMc,
+                Path.GetFileName(instancePath), context.CancellationToken);
         }
         finally
         {
@@ -526,7 +529,9 @@ internal static class ModpackInstallation
                 new Progress<double>(progress => ReportProgressIfActive(context, progress)));
             context.CancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(Path.GetDirectoryName(instancePath)!);
-            Directory.Move(stagingPath, instancePath);
+            var metadataRoot = isPortalMc ? Path.Combine(portalMcRoot, "meta") : Path.GetDirectoryName(Path.GetDirectoryName(instancePath)!)!;
+            await LocalInstanceArchiveService.NormalizeAsync(stagingPath, instancePath, metadataRoot, isPortalMc,
+                instanceId, context.CancellationToken);
             ImportPortalSettings(instancePath);
         }
         catch

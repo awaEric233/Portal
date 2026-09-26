@@ -40,7 +40,7 @@
   </Folder>
   <Folder Name="/Module/Wiki/">
     <Project Path="src/Portal.Wiki/Portal.Wiki.csproj" />
-    <Project Path="src/portal.wiki.demo/portal.wiki.demo.csproj" />
+    <Project Path="src/Portal.Wiki.Demo/Portal.Wiki.Demo.csproj" />
   </Folder>
   <Folder Name="/Solution Item/">
     <File Path="src/Directory.Build.props" />
