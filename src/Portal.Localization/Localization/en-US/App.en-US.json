@@ -11,7 +11,7 @@
     },
     "tab": {
       "tabs": "Tabs",
-      "newTab": "New Tab",
+      "newTab": "Home",
       "closeTab": "Close Current Tab",
       "closeOtherTabs": "Close Other Tabs",
       "openInNewWindow": "Open in New Window"
@@ -19,8 +19,8 @@
     "tooltips": {
       "closeTab": "Close Tab (Ctrl + W)",
       "closeTabMac": "Close Tab (⌃ + W)",
-      "newTab": "New Tab (Ctrl + T)",
-      "newTabMac": "New Tab (⌃ + T)"
+      "newTab": "Home (Ctrl + T)",
+      "newTabMac": "Home (⌃ + T)"
     },
     "settings": "Settings",
     "theme": "Theme",
@@ -78,7 +78,7 @@
   },
   "tabwindow": {
     "tabs": "Tabs",
-    "newTab": "New Tab",
+    "newTab": "Home",
     "closeTab": "Close Current Tab",
     "closeOtherTabs": "Close Other Tabs",
     "openInNewWindow": "Open in New Window"

@@ -52,8 +52,8 @@
     "javaFileAssociation_mrpack": "Minecraft 整合包",
     "jumpList_continueCategory": "继续游戏",
     "jumpList_continueDescription": "启动最近运行的实例",
-    "jumpList_newTabDescription": "在 Portal 中创建一个新标签页",
-    "jumpList_newTabTitle": "新标签页",
+    "jumpList_newTabDescription": "在 Portal 中创建一个新的主页",
+    "jumpList_newTabTitle": "主页",
     "jumpList_settingsDescription": "打开 Portal 设置",
     "jumpList_settingsTitle": "设置",
     "jumpList_taskCategory": "任务",
@@ -737,7 +737,7 @@
     "findingModpack": "正在查找整合包：{0}",
     "parseModpackStep": "解析整合包",
     "identifyingModpackType": "正在识别整合包类型",
-    "unrecognizedModpack": "无法识别的整合包：仅支持 Modrinth（.mrpack）与 CurseForge（.zip）整合包。",
+    "unrecognizedModpack": "无法识别的整合包：支持 Modrinth、CurseForge，以及直接压缩的 Minecraft 实例文件夹。",
     "searchingOn": "正在 {0} 查找：{1}",
     "found": "已找到：{0}",
     "modrinthPackNotFound": "Modrinth 上未找到整合包“{0}”。",
@@ -788,6 +788,7 @@
     "stepProcessingModUrls": "正在处理模组下载地址",
     "stepDownloadingMods": "正在下载整合包模组",
     "stepExtractingModpack": "正在释放整合包文件",
+    "localInstanceExtracting": "正在释放本地实例文件",
     "stepInstalling": "正在安装整合包",
     "installCompleteNotice": "{0} 安装完成",
     "installFailedNotice": "{0} 安装失败：{1}",
@@ -1171,7 +1172,7 @@
     "moveTabForward": "标签页向前移动",
     "moveTabBackward": "标签页向后移动",
     "openStartPage": "打开起始页",
-    "openNewTabPage": "打开新标签页",
+    "openNewTabPage": "打开主页",
     "openWidgetsPage": "打开小组件",
     "openDownloadPage": "打开下载中心",
     "openInstancesPage": "打开实例",
@@ -1901,7 +1902,7 @@
     "pageTitle": "新闻"
   },
   "newTabPage": {
-    "pageTitle": "新标签页"
+    "pageTitle": "主页"
   },
   "homePage": {
     "pageTitle": "主页",
@@ -2262,8 +2263,8 @@
     "multiplayerPath": "联机",
     "news": "新闻",
     "newsPath": "新闻",
-    "newTab": "新标签页",
-    "newTabPath": "新标签页",
+    "newTab": "主页",
+    "newTabPath": "主页",
     "settings": "设置",
     "settingsPath": "设置",
     "startPage": "起始页",

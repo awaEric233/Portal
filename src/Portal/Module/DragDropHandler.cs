@@ -255,7 +255,8 @@ public class DragDropHandler
             effects = DragDropEffects.Link;
         }
 
-        if (paths is [var modpackPath] && ModpackSniffer.TrySniff(modpackPath, out _, out _))
+        if (paths is [var modpackPath] && File.Exists(modpackPath) &&
+            ModpackSniffer.TrySniff(modpackPath, out _, out _))
         {
             message = CommonLanguageManager.Instance.dragDrop_detectedModpack.CurrentValue();
             effects = DragDropEffects.Copy;

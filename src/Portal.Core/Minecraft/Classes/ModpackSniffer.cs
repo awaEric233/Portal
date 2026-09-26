@@ -1,5 +1,6 @@
 using MinecraftLaunch.Components.Installer.Modpack;
 using Portal.Core.Minecraft.Models;
+using Portal.Core.Minecraft.Services;
 using Portal.Localization;
 using Tio.Avalonia.Standard.Modules.DiskIO;
 
@@ -35,6 +36,12 @@ public static class ModpackSniffer
         catch (Exception exception)
         {
             Logger.Debug(string.Format(LogLanguageManager.Instance.modpack_sniffCurseForgeFailed.CurrentValue(), archivePath, Environment.NewLine, exception));
+        }
+
+        if (LocalInstanceArchiveService.TryInspect(archivePath, out suggestedInstanceId))
+        {
+            source = ModDetailsSource.LocalInstance;
+            return true;
         }
 
         return false;

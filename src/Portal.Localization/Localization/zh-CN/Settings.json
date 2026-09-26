@@ -135,8 +135,8 @@
   "applicationdebug": {
     "title": "其他设置",
     "defaultPage": "默认页面",
-    "newTabContent": "新标签页内容",
-    "newTab": "新标签页",
+    "newTabContent": "主页内容",
+    "newTab": "主页",
     "homePage": "起始页",
     "widgets": "小组件",
     "mainPage": "主页",
@@ -242,8 +242,8 @@
     "showDragDropTip": "文件拖入提示",
     "showUpdateTip": "更新提示",
     "optional": "可选项",
-    "showMinecraftNews": "在新标签页中显示Minecraft新闻",
-    "showRecentPlays": "在新标签页中显示最近游戏"
+    "showMinecraftNews": "在主页中显示Minecraft新闻",
+    "showRecentPlays": "在主页中显示最近游戏"
   },
   "shortcuts": {
     "title": "按键绑定",

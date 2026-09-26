@@ -64,16 +64,31 @@ public class Index
             var attr = type.GetCustomAttribute<AggregatedSearchPageAttribute>();
             if (attr == null) continue;
 
+            var title = LocalizationService.ResolveKey(attr.Title);
+            var description = LocalizationService.ResolveKey(attr.Path);
+            if (IsHomeContent(attr))
+            {
+                var homeTitle = CommonLanguageManager.Instance.newTabPage_pageTitle.CurrentValue();
+                title = $"{homeTitle}（{title}）";
+                description = $"{homeTitle}（{description}）";
+            }
+
             yield return new AggregatedSearchEntry
             {
                 Type = AggregatedSearchEntryType.Page,
-                Title = LocalizationService.ResolveKey(attr.Title),
-                Description = LocalizationService.ResolveKey(attr.Path),
+                Title = title,
+                Description = description,
                 IconKey = attr.IconKey,
                 Data = type,
                 TypeDescription = CommonLanguageManager.Instance.aggregatedSearch_page.CurrentValue()
             };
         }
+    }
+
+    private static bool IsHomeContent(AggregatedSearchPageAttribute attr)
+    {
+        return attr.Title is "pages_newTab" or "pages_startPage" or "pages_widgets" or
+            "pages_home" or "pages_launch";
     }
 
     private static AggregatedSearchEntry CreateInstanceEntry(MinecraftInstance instance)

@@ -365,18 +365,30 @@ internal static class ModpackInstallation
             throw new InvalidOperationException(string.Format(
                 CommonLanguageManager.Instance.modpack_instanceIdExists.CurrentValue(), instanceId));
         var stopwatch = Stopwatch.StartNew();
+        var localInstanceCommitted = false;
         Logger.Info($"[Modpack] Installing local {source} modpack {archivePath} to {instancePath}.");
 
         try
         {
-            var minecraft = source switch
+            string installedId;
+            switch (source)
             {
-                ModDetailsSource.Modrinth => await InstallModrinthAsync(context, installFolder, instanceId, archivePath,
-                    GetForgeJavaPath(), instancesRoot),
-                ModDetailsSource.CurseForge => await InstallCurseForgeAsync(context, installFolder, instanceId,
-                    archivePath, GetForgeJavaPath(), instancesRoot),
-                _ => throw new NotSupportedException(CommonLanguageManager.Instance.modpack_unsupportedSource.CurrentValue())
-            };
+                case ModDetailsSource.Modrinth:
+                    installedId = (await InstallModrinthAsync(context, installFolder, instanceId, archivePath,
+                        GetForgeJavaPath(), instancesRoot)).Id;
+                    break;
+                case ModDetailsSource.CurseForge:
+                    installedId = (await InstallCurseForgeAsync(context, installFolder, instanceId, archivePath,
+                        GetForgeJavaPath(), instancesRoot)).Id;
+                    break;
+                case ModDetailsSource.LocalInstance:
+                    await InstallLocalInstanceAsync(context, archivePath, instancePath);
+                    localInstanceCommitted = true;
+                    installedId = instanceId;
+                    break;
+                default:
+                    throw new NotSupportedException(CommonLanguageManager.Instance.modpack_unsupportedSource.CurrentValue());
+            }
             await RunStepAsync(context, CommonLanguageManager.Instance.modpack_importSettingsStep.CurrentValue(),
                 CommonLanguageManager.Instance.modpack_importSettingsDescription.CurrentValue(), step =>
             {
@@ -395,23 +407,47 @@ internal static class ModpackInstallation
             });
             context.SetDescription(string.Format(
                 CommonLanguageManager.Instance.modpack_installComplete.CurrentValue(), instanceId));
-            Logger.Info($"[Modpack] Installed local modpack {archivePath} as {minecraft.Id} in {stopwatch.Elapsed}.");
+            Logger.Info($"[Modpack] Installed local {source} archive {archivePath} as {installedId} in {stopwatch.Elapsed}.");
             return instancePath;
         }
         catch (OperationCanceledException exception)
         {
             Logger.Debug(
                 $"[Modpack] Local installation of {archivePath} was cancelled after {stopwatch.Elapsed}: {exception}");
-            await DeleteDirectoryAsync(instancePath);
+            if (source != ModDetailsSource.LocalInstance || localInstanceCommitted)
+                await DeleteDirectoryAsync(instancePath);
             await DeletePortalMcTemporaryLoaderAsync(instancesRoot, installFolder, instanceId);
             throw;
         }
         catch (Exception exception)
         {
             Logger.Error(exception);
-            await DeleteDirectoryAsync(instancePath);
+            if (source != ModDetailsSource.LocalInstance || localInstanceCommitted)
+                await DeleteDirectoryAsync(instancePath);
             await DeletePortalMcTemporaryLoaderAsync(instancesRoot, installFolder, instanceId);
             throw;
+        }
+    }
+
+    private static async Task InstallLocalInstanceAsync(TaskExecutionContext context, string archivePath,
+        string instancePath)
+    {
+        var stagingPath = Path.Combine(Path.GetTempPath(), "Portal", "modpacks", "instances",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            await RunStepAsync(context, CommonLanguageManager.Instance.modpack_stepExtractingModpack.CurrentValue(),
+                CommonLanguageManager.Instance.modpack_localInstanceExtracting.CurrentValue(), step =>
+                LocalInstanceArchiveService.ExtractAsync(archivePath, stagingPath, step.CancellationToken,
+                    new Progress<double>(progress => step.ReportProgress(progress))));
+
+            context.CancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.GetDirectoryName(instancePath)!);
+            Directory.Move(stagingPath, instancePath);
+        }
+        finally
+        {
+            await DeleteDirectoryAsync(stagingPath);
         }
     }
 

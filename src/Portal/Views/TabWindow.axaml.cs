@@ -126,7 +126,7 @@ public partial class TabWindow : TioTabWindowBase
                 NewTabContent.LaunchPage => new LaunchPage(),
                 _ => new NewTabPage()
             };
-            var tab = new TabEntry(this, page)
+            var tab = new TabEntry(this, page, title: CommonLanguageManager.Instance.newTabPage_pageTitle.CurrentValue())
             {
                 IconMargin = Data.ConfigEntry.NewTabContent switch
                 {

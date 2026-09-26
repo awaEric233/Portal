@@ -135,8 +135,8 @@
   "applicationdebug": {
     "title": "Other Settings",
     "defaultPage": "Default Page",
-    "newTabContent": "New Tab Content",
-    "newTab": "New Tab",
+    "newTabContent": "Home Content",
+    "newTab": "Home",
     "homePage": "Start Page",
     "widgets": "Widgets",
     "mainPage": "Home",
@@ -242,8 +242,8 @@
     "showDragDropTip": "File Drop Hints",
     "showUpdateTip": "Update Notifications",
     "optional": "Optional",
-    "showMinecraftNews": "Show Minecraft News on the New Tab Page",
-    "showRecentPlays": "Show Recent Games on the New Tab Page"
+    "showMinecraftNews": "Show Minecraft News on the Home Page",
+    "showRecentPlays": "Show Recent Games on the Home Page"
   },
   "shortcuts": {
     "title": "Key Bindings",
